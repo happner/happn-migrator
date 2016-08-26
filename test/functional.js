@@ -1,6 +1,8 @@
 var path = require('path');
 var RandomActivityGenerator = require("happn-random-activity-generator");
 var expect = require('expect.js');
+var async = require('async');
+var fs = require('fs-extra');
 
 describe('functional tests', function () {
 
@@ -239,6 +241,9 @@ describe('functional tests', function () {
 
   var verifyOutputFile = function(filename, aggregatedLog, done){
 
+    console.log(aggregatedLog);
+
+    done();
   };
 
   it('generates the output file', function (done) {
@@ -255,18 +260,32 @@ describe('functional tests', function () {
       var randomActivity1 = new RandomActivityGenerator(migrator.__input_clients[0]);
 
       randomActivity1.generateActivityStart("test", function () {
+
         setTimeout(function () {
+
           randomActivity1.generateActivityEnd("test", function (aggregatedLog) {
 
-            migrator.on('generated-outputfile', function(filename){
+            migrator.__generateOutputFile(function(e, filename, logfilename){
 
-              migrator.stop();
+              if (e) return done(e);
 
-              verifyOutputFile(filename, aggregatedLog, done);
+              migrator.__currentOutputFile = filename;
+              migrator.__currentLogFile = logfilename;
 
+              migrator.__populateOutputFile(function(e){
+
+                if (e) return done(e);
+
+                verifyOutputFile(migrator.__currentOutputFile, aggregatedLog, function(e){
+
+                  if (e) return done(e);
+
+                  migrator.on('stopped', done);
+                  migrator.stop();
+
+                });
+              });
             });
-
-            migrator.start();
 
           });
         }, 3000);
@@ -274,17 +293,76 @@ describe('functional tests', function () {
     });
   });
 
-  var verifyOutputDBS = function(outputClients, aggregatedLog, done){
+  var verifyOutputFileClient = function(filename, client, callback){
 
+    var byline = require('byline');
+
+    var stream = byline(fs.createReadStream(filename, { encoding: 'utf8' }));
+
+    var callbackDone = false;
+
+    var errors = [];
+
+    stream.on('data', function(line) {
+
+      if (!callbackDone){
+
+        var object = JSON.parse(line);
+
+        try{
+
+          if (object._meta.path.indexOf('/_SYSTEM') >= 0) return;
+
+          client.get(object._meta.path, {}, function(e, compare){
+
+            var er = null;
+
+            if (e) er = 'error getting item from input client';
+
+            if (!compare) er = 'item does not exist at path: ' + object._meta.path;
+
+            if (compare.key != object.key || compare.data != object.data || compare.data == null || compare.data == undefined) er = 'data does not match at path: ' + object._meta.path;
+
+            if (er) {
+              console.log(er);
+              errors.push(er)
+            }
+
+          });
+        }catch(e){
+          errors.push(e)
+        }
+      }
+    });
+
+    stream.on('end', function(){
+      if (!callbackDone) {
+        setTimeout(function(){
+          if (errors.length > 0) return callback(new Error('there were errors reconciling the data'));
+          callback();
+        }, 5000);
+      }
+    });
+
+    stream.on('error', function(e){
+
+      if (!callbackDone) callback(e);
+      callbackDone = true;
+    });
   };
 
-  xit('pushes the data from the output file to a single output instance', function (done) {
+  function verifyInputAndOutput(outputFile, clients, callback){
+
+    async.eachSeries(clients, function(client, instanceCB){
+
+      verifyOutputFileClient(outputFile, client, instanceCB);
+
+    }, callback);
+  }
+
+  it('does the entire cycle', function (done) {
 
     this.timeout(20000);
-
-    var singleConfig = JSON.parse(JSON.stringify(configFile));
-
-    singleConfig.output_clients.splice(0, 1);
 
     var Migrator = require('../index.js');
     var migrator = new Migrator(configFile);
@@ -293,44 +371,7 @@ describe('functional tests', function () {
 
       if (e) return done(e);
 
-      var randomActivity1 = new RandomActivityGenerator(client1);
-
-      randomActivity1.generateActivityStart("test", function () {
-        setTimeout(function () {
-          randomActivity1.generateActivityEnd("test", function (aggregatedLog) {
-
-            migrator.on('updated-output', function(outputClient){
-
-              migrator.stop();
-
-              verifyOutputDBS([outputClient], aggregatedLog, done);
-
-            });
-
-            migrator.start();
-
-          });
-        }, 3000);
-      });
-    });
-  });
-
-  xit('pushes the data from the output file to multiple output instances', function (done) {
-
-    this.timeout(20000);
-
-    var singleConfig = JSON.parse(JSON.stringify(configFile));
-
-    singleConfig.output_clients.splice(0, 1);
-
-    var Migrator = require('../index.js');
-    var migrator = new Migrator(configFile);
-
-    migrator.initialize(function(e){
-
-      if (e) return done(e);
-
-      var randomActivity1 = new RandomActivityGenerator(client1);
+      var randomActivity1 = new RandomActivityGenerator(migrator.__input_clients[0]);
 
       randomActivity1.generateActivityStart("test", function () {
 
@@ -338,20 +379,16 @@ describe('functional tests', function () {
 
           randomActivity1.generateActivityEnd("test", function (aggregatedLog) {
 
-            var updatedCount = 0;
-            var outputClients = [];
+            migrator.on('completed migration', function(state){
 
-            migrator.on('updated-output', function(outputClient){
+              verifyInputAndOutput(state.output, migrator.__output_clients, function(e){
 
-              updatedCount++;
+                if (e) return done(e);
 
-              outputClients.push(outputClient);
-
-              if (updatedCount == 2){
+                migrator.on('stopped', done);
                 migrator.stop();
-                verifyOutputDBS([outputClients], aggregatedLog, done);
-              }
 
+              });
             });
 
             migrator.start();

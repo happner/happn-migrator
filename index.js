@@ -1,10 +1,13 @@
 var EventEmitter = require("events").EventEmitter;
 var happn = require('happn');
 var async = require('async');
+var fs = require('fs-extra');
 
 function Migrator(config){
 
   if (!config.happn_instances) config.happn_instances = [];
+
+  if (!config.outputFolder) config.outputFolder = __dirname + require('path').sep + 'tmp';
 
   this.__config = config;
   this.__eventEmitter = new EventEmitter();
@@ -101,7 +104,6 @@ Migrator.prototype.initialize = function(callback){
     _this.__createInputClients(function(e){
 
       if (e) {
-        console.log('INPUT CLI ERR:::', e);
         _this.stop();
         return callback(e);
       }
@@ -116,6 +118,8 @@ Migrator.prototype.initialize = function(callback){
         _this.status = 'initialized';
         _this.__emit('initialized');
 
+        callback();
+
       });
 
     });
@@ -124,12 +128,85 @@ Migrator.prototype.initialize = function(callback){
 
 };
 
-Migrator.prototype.__generateOutputFile = function(){
+Migrator.prototype.__appendOutputFile = function(filePath, client, callback){
 
+  client.get('*', function(e, records){
+    if (e) return callback(e);
+
+    async.eachSeries(records, function(record, recordCB){
+      try{
+
+        fs.appendFile(filePath, JSON.stringify(record) + '\r\n', function(e){
+
+          if (e) recordCB(e);
+          else recordCB();
+        });
+      }catch(e){
+        recordCB(e);
+      }
+    }, function(e){
+      callback(e);
+    });
+  });
 };
 
-Migrator.prototype.__importOutputFile = function(){
+Migrator.prototype.__generateOutputFile = function(callback){
 
+  var _this = this;
+
+  fs.ensureDirSync(_this.__config.outputFolder);
+  var outputFile = _this.__config.outputFolder + require('path').sep + Date.now() + '_' + require('shortid').generate() + '.txt';
+  var logFile = outputFile + '.log';
+
+  callback(null, outputFile, logFile);
+};
+
+Migrator.prototype.__populateOutputFile = function(callback){
+  var _this = this;
+
+  if (_this.__input_clients.length == 0) return callback();
+
+  async.eachSeries(_this.__input_clients, function(client, instanceCB){
+    _this.__appendOutputFile(_this.__currentOutputFile, client, instanceCB);
+  }, callback);
+};
+
+Migrator.prototype.__pushOutputToClient = function(filename, client, callback){
+  var byline = require('byline');
+
+  var stream = byline(fs.createReadStream(filename, { encoding: 'utf8' }));
+
+  var callbackDone = false;
+
+  stream.on('data', function(line) {
+
+    if (!callbackDone){
+      var object = JSON.parse(line);
+      client.set(object._meta.path, object);
+    }
+  });
+
+  stream.on('end', function(){
+    if (!callbackDone) callback();
+  });
+
+  stream.on('error', function(e){
+
+    if (!callbackDone) callback(e);
+    callbackDone = true;
+  });
+};
+
+Migrator.prototype.__importOutputFile = function(filename, callback){
+  var _this = this;
+
+  if (_this.__output_clients.length == 0) return callback();
+
+  async.eachSeries(_this.__output_clients, function(client, instanceCB){
+
+    _this.__pushOutputToClient(filename, client, instanceCB);
+
+  }, callback);
 };
 
 Migrator.prototype.start = function(){
@@ -140,19 +217,28 @@ Migrator.prototype.start = function(){
 
   _this.status = 'started';
 
-  this.__generateOutputFile(function(e, filename){
+  _this.__generateOutputFile(function(e, filename, logfilename){
 
     if (e) return _this.__emit('error', e);
 
-    _this.__emit('generated-outputfile', filename);
+    _this.__currentOutputFile = filename;
+    _this.__currentLogFile = logfilename;
 
-    _this.__importOutputFile(filename, function(e, logFilePath){
+    _this.__populateOutputFile(function(e){
 
       if (e) return _this.__emit('error', e);
 
-      _this.__emit('completed migration', logFilePath);
+      _this.__emit('generated-outputfile', _this.__currentOutputFile);
 
-      this.status = 'initialized';
+      _this.__importOutputFile(filename, function(e, logFilePath){
+
+        if (e) return _this.__emit('error', e);
+
+        _this.__emit('completed migration', {"output":_this.__currentOutputFile,"log": _this.__currentLogFile});
+
+        _this.status = 'initialized';
+
+      });
 
     });
 
