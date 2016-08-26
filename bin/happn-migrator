@@ -36,6 +36,7 @@ try{
     report('migration complete:::');
     report('log file:::' + state.log);
     report('imported records:::' + state.output);
+    process.exit(0);
   });
 
   migrator.on('generated-outputfile', function(outputFile){

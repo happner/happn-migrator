@@ -78,5 +78,8 @@ or
 sudo npm install -g happn-migrator
 
 happn-migrator --conf ./test/fixtures/cli_conf.js
+
+#you may have some permissions issues - be sure to specify a temp directory you have permission for in the config field: outputFolder
+
 ```
 
