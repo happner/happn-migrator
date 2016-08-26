@@ -1,7 +1,6 @@
 var path = require('path');
-var happn = require('happn');
-var service = happn.service;
 var RandomActivityGenerator = require("happn-random-activity-generator");
+var expect = require('expect.js');
 
 describe('functional tests', function () {
 
@@ -9,28 +8,28 @@ describe('functional tests', function () {
     happn_instances:[
       {
         name:'Test1',
-        port:55001
+        port:55011
       },{
         name:'Test2',
-        port:55002
+        port:55022
       },{
         name:'Test3',
-        port:55003
+        port:55033
       },{
         name:'Test4',
-        port:55004
+        port:55044
       }
     ],
     input_clients:[
       {
         name:'Test1-input',
         config:{
-          port:55001
+          port:55011
         }
     },{
         name:'Test2-input',
         config:{
-          port:55002
+          port:55022
         }
     }
     ],
@@ -38,12 +37,12 @@ describe('functional tests', function () {
       {
         name:'Test1-output',
         config:{
-          port:55003
+          port:55033
         }
       },{
         name:'Test2-output',
         config:{
-          port:55004
+          port:55044
         }
       }
     ]
@@ -62,6 +61,112 @@ describe('functional tests', function () {
 
   });
 
+  it('tests the migrator events', function(done){
+
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(configFile);
+
+    migrator.on('test-event', function(data){
+      expect(data.test).to.be('ok');
+      done();
+    });
+
+    migrator.__emit('test-event', {"test":"ok"});
+
+  });
+
+  it('fails to start the migrator, as it has not initialized yet', function (done) {
+
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(configFile);
+
+    migrator.on('error', function(e){
+
+      expect(e.toString()).to.be('Error: not initialized or already running...');
+      done();
+
+    });
+
+    migrator.start();
+
+  });
+
+  it('tests the private __startInstances and __stopInstances functions', function (done) {
+
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(configFile);
+
+    migrator.__startInstances(function(e){
+
+      if (e) return done(e);
+
+      expect(migrator.__happn_instances.length).to.be(4);
+
+      migrator.__stopInstances(function(e){
+
+        if (e) return done(e);
+
+        expect(migrator.__happn_instances.length).to.be(0);
+
+        done();
+
+      });
+
+    });
+
+  });
+
+  it('tests starting the clients, after the instances have been started', function (done) {
+
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(configFile);
+
+    migrator.__startInstances(function(e){
+
+      if (e) return done(e);
+
+      expect(migrator.__happn_instances.length).to.be(4);
+
+      migrator.__createInputClients(function(e){
+
+        if (e) return done(e);
+
+        expect(migrator.__input_clients.length).to.be(2);
+
+        migrator.__createOutputClients(function(e){
+
+          if (e) return done(e);
+
+          expect(migrator.__output_clients.length).to.be(2);
+
+          migrator.__disconnectInputClients(function(e){
+
+            if (e) return done(e);
+
+            expect(migrator.__input_clients.length).to.be(0);
+
+            migrator.__disconnectOutputClients(function(e){
+
+              if (e) return done(e);
+
+              expect(migrator.__output_clients.length).to.be(0);
+
+              migrator.__stopInstances(function(e){
+
+                if (e) return done(e);
+
+                expect(migrator.__happn_instances.length).to.be(0);
+
+                done();
+
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+
   it('starts the happn instances, from the config and logs in the happn clients, then stops everything', function (done) {
 
     var Migrator = require('../index.js');
@@ -73,9 +178,7 @@ describe('functional tests', function () {
       expect(migrator.__input_clients.length).to.be(2);
       expect(migrator.__output_clients.length).to.be(2);
 
-      migrator.on('stopped', function(){
-        done();
-      });
+      migrator.on('stopped', done);
 
       migrator.stop();
 
@@ -91,21 +194,45 @@ describe('functional tests', function () {
 
   it('starts the happn instances, from the config and fails to log in a bad client', function (done) {
 
-    var Migrator = require('../index.js');
-    var migrator = new Migrator(configFile);
+    this.timeout(60000);
 
     var badConfig = JSON.parse(JSON.stringify(configFile));
 
     badConfig.input_clients.push({
         name:'Test1-input',
         config:{
-          port:55005
+          port:55055
         }
       }
     );
 
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(badConfig);
+
     migrator.initialize(function(e){
-      expect(e.toString()).to.be('Error: bad input client');
+      expect(e.message).to.be('unable to create input client: Test1-input Error: connect ECONNREFUSED');
+      done();
+    });
+  });
+
+  it('starts the happn instances, from the config and fails to log in a bad client with no name', function (done) {
+
+    this.timeout(60000);
+
+    var badConfig = JSON.parse(JSON.stringify(configFile));
+
+    badConfig.input_clients.push({
+        config:{
+          port:55055
+        }
+      }
+    );
+
+    var Migrator = require('../index.js');
+    var migrator = new Migrator(badConfig);
+
+    migrator.initialize(function(e){
+      expect(e.message).to.be('unable to create input client: unknown Error: connect ECONNREFUSED');
       done();
     });
   });
@@ -125,7 +252,7 @@ describe('functional tests', function () {
 
       if (e) return done(e);
 
-      var randomActivity1 = new RandomActivityGenerator(client1);
+      var randomActivity1 = new RandomActivityGenerator(migrator.__input_clients[0]);
 
       randomActivity1.generateActivityStart("test", function () {
         setTimeout(function () {
@@ -151,7 +278,7 @@ describe('functional tests', function () {
 
   };
 
-  it('pushes the data from the output file to a single output instance', function (done) {
+  xit('pushes the data from the output file to a single output instance', function (done) {
 
     this.timeout(20000);
 
@@ -188,7 +315,7 @@ describe('functional tests', function () {
     });
   });
 
-  it('pushes the data from the output file to multiple output instances', function (done) {
+  xit('pushes the data from the output file to multiple output instances', function (done) {
 
     this.timeout(20000);
 
