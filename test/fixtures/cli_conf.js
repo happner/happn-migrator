@@ -1,8 +1,11 @@
 var mongoService = require('happn-service-mongo');
 var serviceInstance = new mongoService();
+var path = require("path");
 
 var config = {
+  outputFolder:__dirname + path.sep + "tmp",
   happn_instances:[
+
     {
       name:'Test1',//nedb instance
       port:55011
