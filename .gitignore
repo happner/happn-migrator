@@ -9,6 +9,7 @@ lib-cov
 *.log.*
 *.nedb
 *test/tmp*
+/tmp/*
 *test/test-tmp*
 test/test-temp/*
 !test/test-temp/.tests.use.this
