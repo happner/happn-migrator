@@ -74,6 +74,9 @@ var config = {
 
 ```
 npm install -g happn-migrator
+or
+sudo npm install -g happn-migrator
+
 happn-migrator --conf ./test/fixtures/cli_conf.js
 ```
 
