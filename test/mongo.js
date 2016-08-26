@@ -8,11 +8,7 @@ describe('functional tests', function () {
 
   var mongoService = require('happn-service-mongo');
   var serviceInstance = new mongoService();
-
-  var config = {
-    url:'mongodb://127.0.0.1:27017/happn'
-  };
-
+  
   var config = {
     happn_instances:[
       {

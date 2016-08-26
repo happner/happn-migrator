@@ -128,10 +128,26 @@ Migrator.prototype.initialize = function(callback){
 
 };
 
+Migrator.prototype.__writeLog = function(message){
+
+  var _this = this;
+
+  var message = new Date() + '  ' +  message;
+
+  console.log(message);
+
+  fs.appendFile(_this.__currentLogFile, message + '\r\n', function(e){
+    if (e) console.warn('log write failed:::' + e.toString());
+  });
+
+};
+
 Migrator.prototype.__appendOutputFile = function(filePath, client, callback){
 
   client.get('*', function(e, records){
     if (e) return callback(e);
+
+    var count = 0;
 
     async.eachSeries(records, function(record, recordCB){
       try{
@@ -139,13 +155,17 @@ Migrator.prototype.__appendOutputFile = function(filePath, client, callback){
         fs.appendFile(filePath, JSON.stringify(record) + '\r\n', function(e){
 
           if (e) recordCB(e);
-          else recordCB();
+          else {
+            count++;
+            recordCB();
+          }
         });
+
       }catch(e){
         recordCB(e);
       }
     }, function(e){
-      callback(e);
+      callback(e, count);
     });
   });
 };
@@ -166,12 +186,29 @@ Migrator.prototype.__populateOutputFile = function(callback){
 
   if (_this.__input_clients.length == 0) return callback();
 
+  var totalRecords = 0;
+
   async.eachSeries(_this.__input_clients, function(client, instanceCB){
-    _this.__appendOutputFile(_this.__currentOutputFile, client, instanceCB);
-  }, callback);
+    _this.__appendOutputFile(_this.__currentOutputFile, client, function(e, count){
+      if (e) return instanceCB(e);
+
+      _this.__writeLog('output appended from client: ' + count + ' records');
+
+      totalRecords += count;
+
+      instanceCB();
+    });
+  }, function(e){
+    if (e) return callback(e);
+    _this.__writeLog('total records exported: ' + totalRecords );
+    callback();
+  });
 };
 
 Migrator.prototype.__pushOutputToClient = function(filename, client, callback){
+
+  var _this = this;
+
   var byline = require('byline');
 
   var stream = byline(fs.createReadStream(filename, { encoding: 'utf8' }));
@@ -182,12 +219,21 @@ Migrator.prototype.__pushOutputToClient = function(filename, client, callback){
 
     if (!callbackDone){
       var object = JSON.parse(line);
-      client.set(object._meta.path, object);
+
+      if (_this.__config.skipSystemObjects && object._meta.path.substring('/_SYSTEM') == 0) return;
+
+      client.set(object._meta.path, object, function(e){
+
+        if (e)  return _this.__writeLog('output failed for record: ' + object._meta.path);
+        _this.__writeLog('row imported: ' + object._meta.path);
+      });
     }
   });
 
   stream.on('end', function(){
-    if (!callbackDone) callback();
+    if (!callbackDone){
+      callback();
+    }
   });
 
   stream.on('error', function(e){

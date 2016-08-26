@@ -7,6 +7,8 @@ var fs = require('fs-extra');
 describe('functional tests', function () {
 
   var configFile = {
+    skipSystemObjects: false,//will move /_SYSTEM data
+    outputFolder: __dirname + require('path').sep + 'tmp',//will use this folder to put the temporary data
     happn_instances:[
       {
         name:'Test1',
