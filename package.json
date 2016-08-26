@@ -1,15 +1,16 @@
 {
   "name": "happn-migrator",
   "description": "migrate data from single or multiple sources to single or multiple destinations",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "license": "MIT",
-  "bin":{
+  "bin": {
     "happn-migrator": "bin/happn-migrator"
   },
   "dependencies": {
     "async": "^2.0.1",
     "byline": "^5.0.0",
     "commander": "^2.9.0",
+    "fs-extra": "^0.30.0",
     "happn": "^2.12.0",
     "happn-service-mongo": "^0.3.1",
     "shortid": "^2.2.6"
