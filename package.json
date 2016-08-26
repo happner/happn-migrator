@@ -1,10 +1,10 @@
 {
   "name": "happn-migrator",
   "description": "migrate data from single or multiple sources to single or multiple destinations",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "bin":{
-    "happn-migrator": "bin/happn-migrator",
+    "happn-migrator": "bin/happn-migrator"
   },
   "dependencies": {
     "async": "^2.0.1",
