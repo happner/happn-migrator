@@ -19,6 +19,7 @@ test/test-temp/*
 pids
 logs
 results
+/live/*
 
 npm-debug.log
 node_modules

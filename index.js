@@ -128,18 +128,29 @@ Migrator.prototype.initialize = function(callback){
 
 };
 
-Migrator.prototype.__writeLog = function(message){
+Migrator.prototype.__writeLog = function(message, callback){
+
+  var tryCallback = function(){
+    if (callback) callback();
+  };
 
   var _this = this;
 
-  var message = new Date() + '  ' +  message;
+  try{
 
-  console.log(message);
+    var message = new Date() + '  ' +  message;
 
-  fs.appendFile(_this.__currentLogFile, message + '\r\n', function(e){
-    if (e) console.warn('log write failed:::' + e.toString());
-  });
+    console.log(message);
 
+    fs.appendFile(_this.__currentLogFile, message + '\r\n', function(e){
+      if (e) console.warn('log write failed:::' + e.toString());
+      tryCallback();
+    });
+
+  }catch(e){
+    console.warn('log write failed:::' + e.toString());
+    tryCallback();
+  }
 };
 
 Migrator.prototype.__appendOutputFile = function(filePath, client, callback){
@@ -209,38 +220,42 @@ Migrator.prototype.__pushOutputToClient = function(filename, client, callback){
 
   var _this = this;
 
-  var byline = require('byline');
+  var LineByLineReader = require('line-by-line'), lr = new LineByLineReader(filename);
 
-  var stream = byline(fs.createReadStream(filename, { encoding: 'utf8' }));
+  var linesImported = 0;
 
-  var callbackDone = false;
+  lr.on('line', function (line) {
+    try{
 
-  stream.on('data', function(line) {
+      lr.pause();
 
-    if (!callbackDone){
       var object = JSON.parse(line);
-
-      if (_this.__config.skipSystemObjects && object._meta.path.substring('/_SYSTEM') == 0) return;
 
       client.set(object._meta.path, object, function(e){
 
-        if (e)  return _this.__writeLog('output failed for record: ' + object._meta.path);
-        _this.__writeLog('row imported: ' + object._meta.path);
+        if (e)  return _this.__writeLog('output failed for record: ' + object._meta.path, lr.resume.bind(lr));
+        else {
+          linesImported++;
+          _this.__writeLog('row imported: ' + object._meta.path, lr.resume.bind(lr));
+        }
+
       });
+
+    }catch(e){
+      _this.__writeLog('row failed: ' + line, lr.resume.bind(lr));
     }
+
   });
 
-  stream.on('end', function(){
-    if (!callbackDone){
-      callback();
-    }
+  lr.on('end', function(){
+      _this.__writeLog('rows imported: ' + linesImported, callback);
   });
 
-  stream.on('error', function(e){
-
-    if (!callbackDone) callback(e);
-    callbackDone = true;
+  lr.on('error', function(e){
+    lr.pause();
+    _this.__writeLog('line reader error: ' + e.toString(), lr.resume.bind(lr));
   });
+
 };
 
 Migrator.prototype.__importOutputFile = function(filename, callback){
